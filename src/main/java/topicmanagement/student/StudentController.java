@@ -1,0 +1,54 @@
+package topicmanagement.student;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
+import org.springframework.http.*;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import java.security.Principal;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import topicmanagement.dto.response.MessageResponse;
+
+
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('STUDENT')")
+@RestController @RequestMapping("/api/student")
+public class StudentController {
+    private final StudentService service;
+    public StudentController(StudentService service) {this.service=service;}
+    record Name(@NotBlank @Size(max=80) String name, Long periodId) {}
+    record Member(@NotBlank @Size(max=30) String studentId, Long groupId) {}
+    record TopicChoice(@NotBlank @Size(max=30) String topicId, Long groupId) {}
+    record Decision(@NotNull Boolean accept) {}
+    record Cancellation(@Size(max=2000) String note, Long groupId) {}
+    record GroupAction(Long groupId) {}
+    @GetMapping("/me") public Object me(Principal p,@RequestParam(required=false) Long groupId) {return service.state(p.getName(),groupId);}
+    @GetMapping("/periods") public Object periods(Principal p) {return service.periodChoices(p.getName());}
+    @GetMapping("/topics") public Object topics(@RequestParam(defaultValue="") String q,@RequestParam(defaultValue="") String department,@RequestParam(defaultValue="") String type) {return service.catalog(q,department,type);}
+    @GetMapping("/topics/page") public Object topicPage(@RequestParam(defaultValue="") String q,@RequestParam(defaultValue="") String department,
+        @RequestParam(defaultValue="") String type,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="20") int size) {
+        return service.catalogPage(q,department,type,page,size);
+    }
+    @PostMapping("/groups") public Object create(Principal p,@Valid @RequestBody Name input) {service.createGroup(p.getName(),input.name(),input.periodId());return new MessageResponse("Đã tạo nhóm. Bạn là nhóm trưởng.");}
+    @PostMapping("/groups/invitations") public Object invite(Principal p,@Valid @RequestBody Member input) {service.invite(p.getName(),input.studentId(),input.groupId());return new MessageResponse("Đã gửi lời mời. Thành viên cần xác nhận tham gia.");}
+    @PostMapping("/invitations/{id}/response") public Object respond(Principal p,@PathVariable Long id,@Valid @RequestBody Decision input) {service.respond(p.getName(),id,input.accept());return new MessageResponse(input.accept()?"Đã tham gia nhóm.":"Đã từ chối lời mời.");}
+    @PostMapping("/groups/leader") public Object transfer(Principal p,@Valid @RequestBody Member input) {service.transfer(p.getName(),input.studentId(),input.groupId());return new MessageResponse("Đã chuyển quyền nhóm trưởng.");}
+    @PostMapping("/groups/leave") public Object leave(Principal p,@RequestBody(required=false) GroupAction input) {service.leaveGroup(p.getName(),input==null?null:input.groupId());return new MessageResponse("Đã rời nhóm thành công.");}
+    @PostMapping("/groups/members/remove") public Object removeMember(Principal p,@Valid @RequestBody Member input) {service.removeMember(p.getName(),input.studentId(),input.groupId());return new MessageResponse("Đã xóa thành viên khỏi nhóm.");}
+    @PostMapping("/groups/disband") public Object disband(Principal p,@RequestBody(required=false) GroupAction input) {service.disbandGroup(p.getName(),input==null?null:input.groupId());return new MessageResponse("Đã giải tán nhóm thành công.");}
+    @PostMapping("/registrations") public Object register(Principal p,@Valid @RequestBody TopicChoice input) {service.register(p.getName(),input.topicId(),input.groupId());return new MessageResponse("Đã đăng ký đề tài. Vui lòng chờ giảng viên duyệt.");}
+    @PostMapping("/registrations/cancel") public Object cancel(Principal p,@Valid @RequestBody Cancellation input) {service.cancelRegistration(p.getName(),input.note(),input.groupId());return new MessageResponse("Đã hủy đăng ký và giữ lại lịch sử.");}
+    @PostMapping("/reports") public Object upload(Principal p,@RequestParam String stage,@RequestParam(defaultValue="") String note,@RequestParam MultipartFile file,@RequestParam(required=false) Long groupId) throws java.io.IOException {service.upload(p.getName(),stage,note,file,groupId);return new MessageResponse("Đã nộp báo cáo và lưu vào lịch sử.");}
+    @PutMapping(value="/reports/{id}",consumes=MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Object editReport(Principal p,@PathVariable Long id,@RequestParam(defaultValue="") String note,
+            @RequestParam(required=false) MultipartFile file) throws java.io.IOException {
+        service.updateReport(p.getName(),id,note,file);
+        return new MessageResponse("Đã cập nhật báo cáo. Trạng thái chuyển về Chờ duyệt.");
+    }
+    @GetMapping("/reports/{id}/download") public ResponseEntity<byte[]> download(Principal p,@PathVariable Long id) {
+        Report r=service.download(p.getName(),id);
+        return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION,ContentDisposition.attachment().filename(r.filename,StandardCharsets.UTF_8).build().toString())
+            .header(HttpHeaders.CACHE_CONTROL,"no-store").contentType(MediaType.parseMediaType(r.contentType)).body(r.content);
+    }
+}

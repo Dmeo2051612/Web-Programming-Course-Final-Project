@@ -1,0 +1,166 @@
+document.addEventListener('DOMContentLoaded', async () => {
+    function sanitizeName(name, role) {
+        if (!name) {
+            return role === 'DEAN' ? 'Trưởng khoa' : (role === 'STUDENT' ? 'Sinh viên' : 'Giảng viên');
+        }
+        let cleaned = name.replace(/\s*\((demo|test|sample)\)/gi, '').replace(/\b(demo|test|sample)\b/gi, '').trim();
+        return cleaned || (role === 'DEAN' ? 'Trưởng khoa' : (role === 'STUDENT' ? 'Sinh viên' : 'Giảng viên'));
+    }
+
+    const user = await App.getCurrentUser();
+    if (!user) {
+        window.location.href = App.getContextPath() + '/login.html';
+        return;
+    }
+
+    const bell = document.createElement('script');
+    bell.src = '/assets/js/notifications.js';
+    document.body.append(bell);
+
+    // Role and Display
+    const cleanFullName = sanitizeName(user.fullName, user.role);
+    const moduleLabel = user.role === 'DEAN'
+        ? 'Trưởng khoa'
+        : 'Giảng viên';
+
+    const moduleLabelEl = document.getElementById('shell-module-label');
+    if (moduleLabelEl) moduleLabelEl.textContent = moduleLabel;
+
+    const pageTitleEl = document.getElementById('shell-page-title');
+    if (pageTitleEl && pageTitleEl.textContent.includes('Giảng viên')) {
+        pageTitleEl.textContent = pageTitleEl.textContent.replace('Giảng viên', moduleLabel);
+    }
+    document.title = document.title.replace('Giảng viên', moduleLabel);
+
+    const userNameEl = document.getElementById('shell-user-name') || document.querySelector('[data-user-name]');
+    const userRoleEl = document.getElementById('shell-user-role') || document.querySelector('[data-user-role]');
+    const userAvatarEl = document.getElementById('shell-user-avatar') || document.querySelector('[data-user-avatar]');
+
+    if (userNameEl) userNameEl.textContent = cleanFullName;
+    if (userRoleEl) {
+        let roleText = user.role === 'DEAN' ? 'Trưởng khoa' : 'Giảng viên';
+        if (user.department && user.department.code) roleText += ` (${user.department.code})`;
+        userRoleEl.textContent = roleText;
+    }
+    if (userAvatarEl) {
+        const words = cleanFullName.split(/\s+/).filter(Boolean);
+        const initials = words.length === 1 ? words[0].slice(0, 2).toUpperCase() : `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
+        userAvatarEl.textContent = initials;
+        userAvatarEl.setAttribute('aria-label', cleanFullName);
+    }
+
+    // Sidebar navigation items
+    const navContainer = document.querySelector('.sidebar nav');
+    if (navContainer && user.role === 'DEAN') {
+        // The dean keeps the admin sidebar on shared lecturer/council pages; topic pages add their sub-links.
+        const path = location.pathname;
+        const activeKey = path.includes('/councils/') ? 'councils' : 'topics';
+        const topicLinks = path.includes('/lecturer/') ? [
+            ['Tất cả đề tài', '/lecturer/topics/list.html'],
+            ['Đề xuất đề tài', '/lecturer/topics/form.html'],
+            ['Nhóm sinh viên hướng dẫn', '/lecturer/topics/student-groups.html'],
+            ['Duyệt đề tài', '/lecturer/topics/approval.html'],
+        ] : [];
+        const link = (label, href, active, sub) => {
+            const anchor = document.createElement('a');
+            anchor.href = App.getContextPath() + href;
+            anchor.textContent = label;
+            if (sub) anchor.classList.add('nav-sub');
+            if (active) {
+                anchor.classList.add('active');
+                anchor.setAttribute('aria-current', 'page');
+            }
+            return anchor;
+        };
+        const subActive = topicLinks.some(([, href]) => path.endsWith(href));
+        navContainer.replaceChildren();
+        for (const [key, label, href] of DEAN_NAVIGATION) {
+            navContainer.append(link(label, href, key === activeKey && !subActive, false));
+            if (key === 'topics') {
+                for (const [subLabel, subHref] of topicLinks) {
+                    navContainer.append(link(subLabel, subHref, path.endsWith(subHref), true));
+                }
+            }
+        }
+    } else if (navContainer) {
+        if (!navContainer.querySelector('a[href*="/profile.html"]')) {
+            const profileLink = document.createElement('a');
+            profileLink.href = App.getContextPath() + '/profile.html';
+            profileLink.textContent = 'Hồ sơ cá nhân';
+            navContainer.append(profileLink);
+        }
+        // If not already present, ensure council link exists without emoji
+        if (!navContainer.querySelector('a[href*="/councils/"]')) {
+            const link = document.createElement('a');
+            link.href = '/councils/index.html';
+            link.textContent = 'Hội đồng & chấm điểm';
+            navContainer.append(link);
+        }
+    }
+
+    // Show/Hide Topic Approval menu for DEAN only
+    const approvalNav = document.getElementById('nav-approval');
+    if (approvalNav) {
+        if (user.role === 'DEAN') {
+            approvalNav.style.display = '';
+        } else {
+            approvalNav.style.display = 'none';
+        }
+    }
+
+    // Keep faculty announcements at the top of the lecturer dashboard.
+    if (document.querySelector('#stat-my-topics')) {
+        const mainArea = document.querySelector('.content-body') || document.querySelector('.main-content');
+        if (mainArea) {
+            const panel = document.createElement('section');
+            panel.className = 'announcement-panel';
+            panel.setAttribute('aria-label', 'Thông báo từ khoa');
+            panel.innerHTML = '<div class="card-header">' +
+                '<h2 style="font-size:17px;font-weight:750;color:var(--navy);margin:0;">Thông báo từ khoa</h2>' +
+                '<span class="announcement-count badge" hidden></span>' +
+                '</div><div class="announcement-body"><p class="text-muted" style="margin:0;">Đang tải thông báo...</p></div>';
+            const pageHeader = mainArea.querySelector('.page-header');
+            if (pageHeader) pageHeader.insertAdjacentElement('afterend', panel);
+            else mainArea.prepend(panel);
+
+            const loadAnnouncements = async () => {
+                try {
+                    const response = await fetch('/api/lecturer/announcements');
+                    if (!response.ok) throw new Error('Không thể tải thông báo từ khoa.');
+                    const news = await response.json();
+                    const count = panel.querySelector('.announcement-count');
+                    count.hidden = !news.length;
+                    count.textContent = `${news.length} thông báo`;
+                    panel.querySelector('.announcement-body').innerHTML = news.length
+                        ? news.map(a => `<div class="announcement-item"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;"><h3 style="font-size:15px;margin:0;font-weight:700;color:var(--navy);">${escapeHtml(a.title)}</h3>${a.createdAt ? `<span style="font-size:12px;color:var(--text-muted);white-space:nowrap;font-weight:500;">${new Date(a.createdAt).toLocaleDateString('vi-VN')}</span>` : ''}</div><p style="margin:0;white-space:pre-wrap;color:var(--text-secondary);font-size:13.5px;line-height:1.6;">${escapeHtml(a.content)}</p></div>`).join('')
+                        : '<p class="text-muted" style="margin:0;">Chưa có thông báo mới.</p>';
+                } catch (error) {
+                    console.error(error);
+                    panel.querySelector('.announcement-body').innerHTML = '<p class="text-muted" style="margin:0;">Không thể tải thông báo từ khoa.</p>';
+                }
+            };
+            await loadAnnouncements();
+            document.addEventListener('announcements:updated', loadAnnouncements);
+        }
+    }
+
+    // Mobile menu toggle
+    document.addEventListener('click', (event) => {
+        const toggle = event.target.closest('[data-menu-toggle]');
+        const sidebar = document.querySelector('.sidebar');
+        if (toggle) {
+            sidebar?.classList.toggle('open');
+        } else if (sidebar && sidebar.classList.contains('open') && !event.target.closest('.sidebar')) {
+            sidebar.classList.remove('open');
+        }
+    });
+
+    // Logout
+    const logoutBtn = document.getElementById('shell-logout-btn') || document.querySelector('[data-logout]');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            App.logout();
+        });
+    }
+});

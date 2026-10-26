@@ -1,0 +1,102 @@
+@import url("style.css");
+@import url("admin.css");
+
+.app-message-dialog {
+    width: min(440px, calc(100vw - 32px));
+    max-width: none;
+    border: 1px solid #dfe7ef;
+    border-radius: 18px;
+    padding: 28px;
+    box-shadow: 0 22px 60px #14284440;
+    color: #15324d;
+    text-align: center;
+}
+.app-message-dialog::backdrop { background: #0e213f80; }
+.app-message-dialog .app-message-icon {
+    width: 48px; height: 48px; margin: 0 auto 16px; border-radius: 50%;
+    display: grid; place-items: center; background: #fff0f0; color: #b22b37;
+    font-size: 26px; font-weight: 800;
+}
+.app-message-dialog[data-kind="success"] .app-message-icon { background: #e8f5ef; color: #167b58; }
+.app-message-dialog h2 { margin: 0 0 10px; font-size: 19px; }
+.app-message-dialog p { margin: 0 0 24px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-message-dialog button { min-width: 120px; }
+
+.password-toggle-wrap { position: relative; display: flex; align-items: center; width: 100%; }
+.password-toggle-wrap > input { padding-right: 48px; }
+.password-visibility-toggle {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 6px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: #64748b;
+    box-shadow: none;
+}
+.password-visibility-toggle:hover { background: #edf3f8; color: #164f7d; }
+.password-visibility-toggle:focus-visible { outline: 2px solid #337ab7; }
+.password-visibility-toggle svg { width: 20px; height: 20px; }
+
+/* Shared Utility Classes */
+.page-nav {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.page-nav a {
+    font-weight: 600;
+}
+
+.toast {
+    margin: 0 0 16px;
+}
+
+.inline-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.form-error {
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.text-muted {
+    color: var(--text-muted);
+}
+
+.font-semibold {
+    font-weight: 600;
+}
+
+.avatar-circle {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--primary-light);
+    color: var(--primary-dark);
+    font-weight: 700;
+    font-size: 13px;
+    border: 2px solid #ffffff;
+    box-shadow: 0 0 0 1px var(--border);
+}

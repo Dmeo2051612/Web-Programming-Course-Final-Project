@@ -1,0 +1,303 @@
+# Thiết kế Cơ sở dữ liệu: Hệ thống Quản lý Đề tài Sinh viên HCM-UTE
+
+## 1. Kiến trúc lưu trữ & Quy ước thiết kế
+
+Tầng lưu trữ dữ liệu của hệ thống được thiết kế hướng tới tính toàn vẹn, tính nhất quán quan hệ và khả năng mở rộng cao trên hệ quản trị **MySQL Server 8.0+** (sử dụng Storage Engine InnoDB, bảng mã ký tự `utf8mb4` và collation `utf8mb4_unicode_ci`), đồng thời tương thích hoàn toàn với **H2 Database** phục vụ môi trường kiểm thử tự động và demo cục bộ.
+
+- **Khóa chính (Primary Keys)**: Số nguyên 64-bit tự tăng (`BIGINT AUTO_INCREMENT`).
+- **Mốc thời gian (Timestamps)**: Sử dụng kiểu `DATETIME(6)` với độ chính xác microsecond, múi giờ Việt Nam (`Asia/Ho_Chi_Minh`), tự động ghi nhận thời điểm tạo (`created_at`) và thời điểm cập nhật (`updated_at`).
+- **Khóa lạc quan (Optimistic Locking)**: Cột `version BIGINT` trên các bảng có tần suất cập nhật cao (`topics`, `student_groups`, `topic_registrations`, `councils`, `defenses`, `advisor_quotas`) nhằm chống ghi đè dữ liệu khi có tương tác đồng thời.
+- **Ràng buộc toàn vẹn**: Thực thi khóa ngoại (Foreign Keys) với chính sách xóa phù hợp (`ON DELETE CASCADE` hoặc `ON DELETE SET NULL`), các ràng buộc kiểm tra giá trị (`CHECK constraints`), và chỉ mục duy nhất kết hợp (`UNIQUE compound indexes`).
+
+---
+
+## 2. Sơ đồ Quan hệ Thực thể (Entity-Relationship Diagram - ERD)
+
+```mermaid
+erDiagram
+    departments ||--o{ users : "thuộc về"
+    departments ||--o{ topics : "quản lý chuyên môn"
+    departments ||--o{ announcements : "phạm vi thông báo bộ môn"
+    
+    users ||--o{ topics : "đề xuất / hướng dẫn"
+    users ||--o{ student_groups : "làm nhóm trưởng"
+    users ||--o{ group_members : "tham gia thành viên"
+    users ||--o{ group_invitations : "nhận lời mời"
+    users ||--o{ council_members : "tham gia hội đồng"
+    users ||--o{ defense_grades : "chấm điểm bảo vệ"
+    users ||--o{ student_reports : "nộp báo cáo / GVHD nhận xét"
+    users ||--o{ student_report_edits : "lưu phiên bản trước khi chỉnh sửa"
+    users ||--o{ announcements : "tác giả thông báo"
+    users ||--o{ announcement_reads : "đánh dấu đã đọc"
+    users ||--o{ email_notifications : "nhận email kết quả"
+    users ||--o{ audit_logs : "thực hiện thao tác"
+    users ||--o{ advisor_quotas : "được phân bổ chỉ tiêu"
+
+    announcements ||--o{ announcement_reads : "lượt đọc"
+
+    registration_periods ||--o{ topics : "thuộc đợt"
+    registration_periods ||--o{ student_groups : "hoạt động trong đợt"
+    registration_periods ||--o{ group_members : "giới hạn phạm vi đợt"
+    registration_periods ||--o{ advisor_quotas : "chỉ tiêu theo đợt"
+
+    topics ||--o{ student_groups : "được giao cho"
+    topics ||--o{ topic_registrations : "được đăng ký"
+    topics ||--o{ student_reports : "báo cáo đề tài"
+    topics ||--o{ defenses : "bảo vệ đề tài"
+
+    student_groups ||--o{ group_members : "bao gồm"
+    student_groups ||--o{ group_invitations : "phát lời mời"
+    student_groups ||--o{ topic_registrations : "gửi yêu cầu đăng ký"
+    student_groups ||--o{ student_reports : "nộp báo cáo tiến độ"
+    student_groups ||--o| defenses : "tham gia bảo vệ"
+
+    topic_registrations ||--o{ registration_status_history : "lịch sử trạng thái"
+    topic_registrations ||--o{ student_reports : "liên kết báo cáo"
+    topic_registrations ||--o| defenses : "được đánh giá"
+
+    councils ||--o{ council_members : "danh sách giảng viên"
+    councils ||--o{ defenses : "chấm bảo vệ"
+
+    defenses ||--o{ defense_grades : "chi tiết điểm thành viên"
+    defenses ||--o{ email_notifications : "email công bố điểm"
+    student_reports ||--o{ student_report_edits : "lịch sử phiên bản"
+```
+
+---
+
+## 3. Danh mục chi tiết các bảng dữ liệu
+
+### 3.1 `departments` (Bộ môn chuyên ngành)
+Lưu trữ danh sách các Bộ môn trực thuộc Khoa Công nghệ Thông tin.
+- `id` (`BIGINT`, PK, Auto-increment)
+- `code` (`VARCHAR(50)`, NOT NULL, UNIQUE): Mã bộ môn (ví dụ: `CNPM`, `HTTT`, `KHDL`, `MMT`).
+- `name` (`VARCHAR(255)`, NOT NULL): Tên đầy đủ của bộ môn.
+- `description` (`TEXT`, NULL): Mô tả chuyên ngành hoặc chức năng của bộ môn.
+
+### 3.2 `users` (Người dùng hệ thống)
+Lưu trữ tài khoản của toàn bộ cán bộ, giảng viên và sinh viên.
+- `id` (`BIGINT`, PK, Auto-increment)
+- `user_code` (`VARCHAR(50)`, NOT NULL, UNIQUE): Mã số sinh viên (MSSV) hoặc Mã số giảng viên (MSGV).
+- `username` (`VARCHAR(100)`, NOT NULL, UNIQUE): Tên đăng nhập duy nhất.
+- `password_hash` (`VARCHAR(512)`, NOT NULL): Mật khẩu đã băm bằng giải thuật BCrypt.
+- `full_name` (`VARCHAR(255)`, NOT NULL): Họ và tên đầy đủ của người dùng.
+- `email` (`VARCHAR(255)`, NOT NULL, UNIQUE): Địa chỉ email phục vụ thông báo và tài khoản.
+- `student_class` (`VARCHAR(50)`, NULL): Lớp của sinh viên, do Trưởng khoa cập nhật; các vai trò khác không dùng trường này.
+- `role` (`VARCHAR(30)`, NOT NULL): Vai trò hệ thống (`DEAN`, `LECTURER`, `STUDENT`). Ràng buộc `ck_users_role` kiểm tra `role IN ('DEAN', 'LECTURER', 'STUDENT')`.
+- `department_id` (`BIGINT`, NULL, FK $\rightarrow$ `departments(id)`): Gán bộ môn chuyên môn đối với giảng viên (`ROLE_LECTURER`).
+- `status` (`VARCHAR(20)`, NOT NULL): Trạng thái tài khoản (`ACTIVE`, `INACTIVE`, `LOCKED`).
+- `password_changed_at` (`DATETIME(6)`, NULL): Mốc thời gian đổi mật khẩu gần nhất để hủy phiên đăng nhập cũ.
+- `created_at`, `updated_at` (`DATETIME(6)`): Thời điểm khởi tạo và cập nhật gần nhất.
+
+### 3.3 `registration_periods` (Đợt đăng ký đề tài)
+Quản lý các đợt đăng ký và các mốc thời hạn theo quy chế đào tạo.
+- `id` (`BIGINT`, PK, Auto-increment)
+- `name` (`VARCHAR(255)`, NOT NULL): Tên đợt đăng ký.
+- `type` (`VARCHAR(30)`, NOT NULL): Loại đợt (`COURSE`, `NCKH`, `TLCN`, `KLTN`).
+- `lecturer_start_at`, `lecturer_end_at` (`DATETIME(6)`, NOT NULL): Cửa sổ thời gian giảng viên đề xuất đề tài.
+- `student_start_at`, `student_end_at` (`DATETIME(6)`, NOT NULL): Cửa sổ thời gian sinh viên đăng ký đề tài.
+- `review_deadline` (`DATETIME(6)`, NULL): Hạn chót nộp báo cáo và phản biện.
+- `defense_date` (`DATE`, NULL): Ngày tổ chức hội đồng bảo vệ.
+- **Ràng buộc kiểm tra**:
+  - `ck_period_times`: `lecturer_start_at < lecturer_end_at < student_start_at < student_end_at`.
+  - `ck_period_review`: `COURSE`/`NCKH` không có hạn GVPB và ngày hội đồng; `TLCN` bắt buộc hạn GVPB sau `student_end_at`; `KLTN` bắt buộc cả hạn GVPB và ngày hội đồng sau hạn GVPB.
+
+### 3.4 `topics` (Đề tài học thuật)
+Lưu trữ danh sách các đề tài do giảng viên hoặc trưởng khoa đề xuất.
+- `id` (`BIGINT`, PK, Auto-increment)
+- `version` (`BIGINT`, Khóa lạc quan)
+- `topic_code` (`VARCHAR(50)`, NOT NULL, UNIQUE): Mã đề tài (ví dụ: `TOPIC-2026-001`).
+- `title` (`VARCHAR(255)`, NOT NULL): Tên đề tài.
+- `description` (`TEXT`, NOT NULL): Mô tả chi tiết mục tiêu đề tài ($\ge 10$ ký tự).
+- `requirements` (`TEXT`, NULL): Yêu cầu kiến thức và kỹ năng đối với sinh viên.
+- `max_students` (`INT`, NOT NULL, DEFAULT 3): Số lượng sinh viên tối đa cho phép (1 đến 3).
+- `topic_type` (`VARCHAR(30)`, NOT NULL): Loại hình đề tài tương ứng với đợt đăng ký.
+- `status` (`VARCHAR(20)`, NOT NULL): Trạng thái phê duyệt (`PENDING`, `APPROVED`, `REJECTED`).
+- `rejection_reason` (`TEXT`, NULL): Lý do từ chối của Trưởng khoa khi thẩm định đề tài (nếu có).
+- `department_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `departments(id)`)
+- `period_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `registration_periods(id)`)
+- `created_by` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`)
+- `advisor1_id` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): Giảng viên hướng dẫn chính.
+- `advisor2_id` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): Giảng viên hướng dẫn phụ.
+- **Ràng buộc**: `ck_topics_advisors`: `advisor1_id <> advisor2_id`, `ck_topics_size`: `max_students BETWEEN 1 AND 3`.
+
+### 3.5 `student_groups` & `group_members` (Nhóm sinh viên & Thành viên)
+- **`student_groups`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `group_code` (`VARCHAR(50)`, NOT NULL, UNIQUE): Mã nhóm duy nhất (ví dụ: `GRP-202601`).
+  - `group_name` (`VARCHAR(255)`, NOT NULL): Tên gọi của nhóm.
+  - `topic_id` (`BIGINT`, NULL, FK $\rightarrow$ `topics(id)`): Đề tài đã được giao chính thức.
+  - `period_id` (`BIGINT`, NULL, FK $\rightarrow$ `registration_periods(id)`): Đợt đăng ký của nhóm.
+  - `leader_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Người tạo nhóm (Nhóm trưởng).
+  - `member_count` (`INT`, NOT NULL, DEFAULT 1): Số lượng thành viên (1 đến 3). Ràng buộc `ck_groups_size`: `member_count BETWEEN 1 AND 3`.
+  - `status` (`VARCHAR(20)`, NOT NULL): Trạng thái (`DRAFT`, `PENDING`, `APPROVED`, `REJECTED`).
+- **`group_members`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `group_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `student_groups(id)` ON DELETE CASCADE)
+  - `student_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`)
+  - `registration_period_id` (`BIGINT`, NULL, FK $\rightarrow$ `registration_periods(id)`)
+  - `member_role` (`VARCHAR(20)`, NOT NULL): Vai trò trong nhóm (`LEADER`, `MEMBER`).
+  - **Ràng buộc then chốt**: `uk_group_member_period_student UNIQUE (registration_period_id, student_id)`. Bảo đảm một sinh viên chỉ có thể tham gia đúng 1 nhóm trong một đợt đăng ký cụ thể.
+
+### 3.6 `topic_registrations` & `registration_status_history` (Đăng ký đề tài & Lịch sử)
+- **`topic_registrations`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `group_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `student_groups(id)` ON DELETE CASCADE)
+  - `topic_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `topics(id)`)
+  - `status` (`VARCHAR(20)`, NOT NULL): Trạng thái đăng ký (`DRAFT`, `PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`).
+  - `decided_by` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): Người phê duyệt đăng ký.
+  - `reason` (`VARCHAR(2000)`, NULL): Lý do phê duyệt hoặc từ chối.
+- **`registration_status_history`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `registration_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `topic_registrations(id)` ON DELETE CASCADE)
+  - `old_status`, `new_status` (`VARCHAR(20)`, NOT NULL)
+  - `changed_by` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`)
+  - `changed_at` (`DATETIME(6)`, NOT NULL)
+  - `note` (`VARCHAR(2000)`, NULL)
+
+### 3.7 `student_reports` (Báo cáo tiến độ)
+Lưu trữ tệp tài liệu và báo cáo do nhóm sinh viên nộp qua các giai đoạn.
+- `id` (`BIGINT`, PK, Auto-increment)
+- `group_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `student_groups(id)` ON DELETE CASCADE)
+- `registration_id` (`BIGINT`, NULL, FK $\rightarrow$ `topic_registrations(id)` ON DELETE SET NULL)
+- `topic_id` (`BIGINT`, NULL, FK $\rightarrow$ `topics(id)` ON DELETE SET NULL)
+- `submitted_by_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Nhóm trưởng nộp bài.
+- `filename` (`VARCHAR(180)`, NOT NULL): Tên tệp gốc.
+- `content_type` (`VARCHAR(255)`, NOT NULL): Định dạng MIME (`application/pdf`, `.docx`).
+- `stage` (`VARCHAR(255)`, NOT NULL): Giai đoạn báo cáo (`Đề cương`, `Giữa kỳ`, `Cuối kỳ`).
+- `note` (`VARCHAR(1000)`, NOT NULL): Ghi chú của nhóm khi nộp.
+- `submitted_at` (`DATETIME(6)`, NOT NULL): Thời điểm nộp.
+- `content` (`LONGBLOB`, NOT NULL): Nội dung nhị phân của tệp báo cáo.
+- `report_size` (`BIGINT`, NULL): Kích thước tệp (byte).
+- `checksum` (`VARCHAR(64)`, NULL): Chuỗi mã băm SHA-256 đối soát toàn vẹn dữ liệu.
+- `late` (`BOOLEAN`, NOT NULL, DEFAULT FALSE): Đánh dấu nộp trễ nếu sau hạn chót.
+- `advisor_feedback` (`TEXT`, NULL): Nhận xét của giảng viên hướng dẫn (V8).
+- `feedback_by_id` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): GVHD viết nhận xét (V8).
+- `feedback_at` (`DATETIME(6)`, NULL): Thời điểm nhận xét (V8).
+- `status` (`VARCHAR(20)`, NOT NULL, DEFAULT `PENDING`): Trạng thái duyệt (`PENDING`, `REJECTED`, `APPROVED`), có ràng buộc `ck_student_report_status` (V9).
+- `edit_count` (`INT`, NOT NULL, DEFAULT 0): Số lần nhóm trưởng chỉnh sửa (V9).
+- `status_updated_at` (`DATETIME(6)`, NULL), `status_updated_by_id` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): Thời điểm và người cập nhật trạng thái (V9).
+- `storage_path` (`VARCHAR(500)`, NULL): Đường dẫn lưu trữ riêng nếu chuyển nội dung tệp khỏi CSDL.
+
+### 3.8 `student_report_edits` (Lịch sử chỉnh sửa báo cáo)
+Lưu snapshot phiên bản báo cáo ngay trước mỗi lần nhóm trưởng chỉnh sửa; snapshot và cập nhật báo cáo được ghi trong cùng giao dịch (V9).
+- `id` (`BIGINT`, PK, Auto-increment)
+- `report_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `student_reports(id)` ON DELETE CASCADE): Báo cáo gốc.
+- `changed_by_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Người thực hiện chỉnh sửa.
+- `edited_at` (`DATETIME(6)`, NOT NULL): Thời điểm lưu snapshot.
+- `filename` (`VARCHAR(180)`, NOT NULL), `content_type` (`VARCHAR(255)`, NOT NULL), `note` (`VARCHAR(1000)`, NOT NULL): Metadata phiên bản cũ.
+- `report_size` (`BIGINT`, NOT NULL), `checksum` (`VARCHAR(64)`, NULL): Kích thước và checksum SHA-256 nếu có.
+- `content` (`LONGBLOB`, NOT NULL): Nội dung đầy đủ của phiên bản cũ.
+
+**Ràng buộc:** Xóa báo cáo sẽ xóa lịch sử phiên bản theo `ON DELETE CASCADE`; tài khoản người chỉnh sửa được tham chiếu bằng khóa ngoại không cascade.
+
+### 3.9 `councils` & `council_members` (Hội đồng bảo vệ & Thành viên)
+- **`councils`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `code` (`VARCHAR(30)`, NOT NULL, UNIQUE): Mã hội đồng (ví dụ: `HD-CNTT-01`).
+  - `name` (`VARCHAR(150)`, NOT NULL): Tên gọi của hội đồng.
+  - `defense_date` (`DATETIME(6)`, NOT NULL): Thời gian tổ chức buổi bảo vệ.
+  - `room` (`VARCHAR(80)`, NOT NULL): Phòng bảo vệ trực tiếp hoặc đường dẫn trực tuyến.
+  - `status` (`VARCHAR(20)`, NOT NULL): Trạng thái (`DRAFT`, `READY`, `COMPLETED`).
+- **`council_members`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `council_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `councils(id)` ON DELETE CASCADE)
+  - `lecturer_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`)
+  - `role` (`VARCHAR(20)`, NOT NULL): Vai trò (`CHAIRPERSON`, `SECRETARY`, `REVIEWER`, `MEMBER`).
+  - **Ràng buộc**: `uk_council_lecturer UNIQUE (council_id, lecturer_id)`.
+
+### 3.10 `defenses` & `defense_grades` (Lịch bảo vệ & Chi tiết chấm điểm)
+- **`defenses`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `group_id` (`BIGINT`, NOT NULL, UNIQUE, FK $\rightarrow$ `student_groups(id)`)
+  - `registration_id` (`BIGINT`, NULL, UNIQUE, FK $\rightarrow$ `topic_registrations(id)`)
+  - `topic_id` (`BIGINT`, NULL, FK $\rightarrow$ `topics(id)`)
+  - `council_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `councils(id)`)
+  - `reviewer_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Giảng viên phản biện chỉ định (`GVPB`).
+  - `finalized` (`BOOLEAN`, NOT NULL, DEFAULT FALSE): Đã tổng hợp điểm xong bởi Chủ tịch.
+  - `published` (`BOOLEAN`, NOT NULL, DEFAULT FALSE): Đã công bố kết quả bởi Trưởng khoa.
+  - `final_score` (`DECIMAL(4,2)`, NULL): Điểm trung bình cộng cuối cùng (thang điểm 0.00 đến 10.00).
+- **`defense_grades`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `defense_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `defenses(id)` ON DELETE CASCADE)
+  - `evaluator_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Giảng viên chấm điểm.
+  - `score` (`DECIMAL(4,2)`, NOT NULL): Điểm số đánh giá cá nhân (0.00 đến 10.00).
+  - `comment` (`VARCHAR(2000)`, NOT NULL): Nhận xét chuyên môn.
+  - **Ràng buộc**: `uk_defense_evaluator UNIQUE (defense_id, evaluator_id)`.
+
+### 3.11 `group_invitations` (Lời mời vào nhóm)
+- `id` (`BIGINT`, PK, Auto-increment)
+- `group_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `student_groups(id)` ON DELETE CASCADE)
+- `student_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Sinh viên được mời.
+- `status` (`VARCHAR(30)`, NOT NULL, DEFAULT `PENDING`): `PENDING`, `ACCEPTED`, `DECLINED`.
+- `created_at` (`DATETIME(6)`, NOT NULL)
+- **Ràng buộc**: `uk_group_invitation UNIQUE (group_id, student_id)`.
+
+### 3.12 `advisor_quotas` (Chỉ tiêu hướng dẫn)
+- `id` (`BIGINT`, PK, Auto-increment)
+- `version` (`BIGINT`, Khóa lạc quan)
+- `registration_period_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `registration_periods(id)`)
+- `lecturer_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`)
+- `max_groups` (`INT`, NOT NULL): Số nhóm tối đa giảng viên được hướng dẫn trong đợt (1 đến 100).
+- **Ràng buộc**: `uk_quota_period_lecturer UNIQUE (registration_period_id, lecturer_id)`.
+
+### 3.13 `announcements` & `announcement_reads` (Thông báo & Lượt đọc)
+- **`announcements`**:
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `title` (`VARCHAR(255)`, NOT NULL): Tiêu đề thông báo.
+  - `content` (`TEXT`, NOT NULL): Nội dung thông báo.
+  - `audience` (`VARCHAR(30)`, NOT NULL): Đối tượng nhận (`ALL`, `LECTURER`, `STUDENT`). Ràng buộc `ck_announcements_audience` kiểm tra `audience IN ('ALL', 'LECTURER', 'STUDENT')`.
+  - `department_id` (`BIGINT`, NULL, FK $\rightarrow$ `departments(id)`): Giới hạn thông báo trong một bộ môn; NULL là thông báo toàn khoa (V8).
+  - `created_by` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)`): Người đăng thông báo.
+  - `created_at` (`DATETIME(6)`)
+- **`announcement_reads`** (V8): Ghi nhận từng người đã đọc thông báo để đếm tin chưa đọc trên chuông thông báo.
+  - `id` (`BIGINT`, PK, Auto-increment)
+  - `announcement_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `announcements(id)` ON DELETE CASCADE)
+  - `user_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)` ON DELETE CASCADE)
+  - `read_at` (`DATETIME(6)`, NOT NULL): Thời điểm đọc.
+  - **Ràng buộc**: `uk_announcement_read UNIQUE (announcement_id, user_id)`, mỗi người chỉ có một lượt đọc cho mỗi thông báo.
+
+### 3.14 `email_notifications` (Hàng đợi email công bố điểm)
+Mỗi khi Trưởng khoa công bố kết quả, hệ thống tạo một thư cho từng sinh viên trong nhóm trong cùng giao dịch; worker gửi qua SMTP và thử lại khi lỗi (V6).
+- `id` (`BIGINT`, PK, Auto-increment)
+- `version` (`BIGINT`, Khóa lạc quan)
+- `defense_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `defenses(id)`): Kết quả bảo vệ được công bố.
+- `student_id` (`BIGINT`, NOT NULL, FK $\rightarrow$ `users(id)`): Sinh viên nhận thư.
+- `recipient` (`VARCHAR(255)`, NOT NULL): Địa chỉ email nhận.
+- `subject` (`VARCHAR(255)`, NOT NULL), `body` (`TEXT`, NOT NULL): Tiêu đề và nội dung thư.
+- `status` (`VARCHAR(20)`, NOT NULL): `PENDING`, `SENT`, `FAILED`.
+- `attempts` (`INT`, NOT NULL, DEFAULT 0): Số lần đã thử gửi.
+- `created_at`, `next_attempt_at` (`DATETIME(6)`, NOT NULL): Thời điểm tạo và lần thử gửi kế tiếp.
+- `sent_at` (`DATETIME(6)`, NULL): Thời điểm gửi thành công.
+- `last_error` (`VARCHAR(300)`, NULL): Lỗi gần nhất khi gửi.
+- **Ràng buộc**: `uk_result_email UNIQUE (defense_id, student_id)` chống gửi trùng; chỉ mục `idx_email_due (status, next_attempt_at)` phục vụ worker.
+
+### 3.15 `audit_logs` (Nhật ký thao tác)
+- `id` (`BIGINT`, PK, Auto-increment)
+- `user_id` (`BIGINT`, NULL, FK $\rightarrow$ `users(id)` ON DELETE SET NULL): Người thực hiện.
+- `action` (`VARCHAR(80)`, NOT NULL): Hành động (ví dụ: `APPROVE_TOPIC`, `PUBLISH_RESULT`).
+- `entity_name` (`VARCHAR(80)`, NOT NULL), `entity_id` (`VARCHAR(80)`, NULL): Đối tượng bị tác động.
+- `old_value`, `new_value` (`LONGTEXT`, NULL): Giá trị trước và sau thay đổi.
+- `ip_address` (`VARCHAR(64)`, NULL)
+- `created_at` (`DATETIME(6)`, NOT NULL)
+
+---
+
+## 4. Quản lý tiến hóa Schema qua Flyway Migrations
+
+Các bản V2–V5 là lịch sử tại `database/migration/`; Flyway thực thi các bản V6–V13 trong `src/main/resources/db/migration/mysql/`:
+
+| Phiên bản | Tệp script Migration | Mô tả thay đổi kiến trúc |
+| :--- | :--- | :--- |
+| `V2` | `V2__add_topic_registration.sql` | Phân tách mô hình `topic_registrations` độc lập và thêm bảng `audit_logs`. |
+| `V3` | `V3__add_registration_history.sql` | Bổ sung bảng `registration_status_history` ghi vết toàn diện chuyển đổi trạng thái. |
+| `V4` | `V4__add_quota_audit_report_metadata.sql` | Bổ sung bảng chỉ tiêu hướng dẫn `advisor_quotas` và metadata toàn vẹn tệp báo cáo. |
+| `V5` | `V5__fix_constraints_and_linkages.sql` | Bổ sung cột `password_changed_at`, ràng buộc thành viên nhóm theo đợt (`uk_group_member_period_student`), và liên kết trực tiếp `registration_id`, `topic_id` vào `student_reports` và `defenses`. |
+| `V6` | `V6__add_result_email_outbox.sql` | Tạo hàng đợi email thông báo kết quả. |
+| `V7` | `V7__add_student_class.sql` | Thêm cột lớp sinh viên trong bảng `users`. |
+| `V8` | `V8__notifications_and_advisor_feedback.sql` | Thêm phạm vi bộ môn và lượt đọc thông báo; lưu nhận xét báo cáo của giảng viên hướng dẫn. |
+| `V9` | `V9__report_review_and_edit_history.sql` | Thêm trạng thái duyệt báo cáo, người cập nhật và lịch sử phiên bản tệp. |
+| `V10` | `V10__advisor_guidance_and_completion.sql` | Thêm nhiệm vụ, yêu cầu hướng dẫn và mốc GVHD xác nhận hoàn thành của nhóm. |
+| `V11` | `V11__remove_head_of_dept_role.sql` | Loại bỏ hoàn toàn role `HEAD_OF_DEPT`: chuyển đổi dữ liệu người dùng và thông báo sang `LECTURER`, cập nhật ràng buộc `ck_users_role` và `ck_announcements_audience` chỉ còn 3 vai trò (`DEAN`, `LECTURER`, `STUDENT`). |
+| `V12` | `V12__update_group_and_topic_size_constraints.sql` | Tạm đổi quy mô: `ck_topics_size` 3–5 và `ck_groups_size` 1–5 (được thay bằng V13). |
+| `V13` | `V13__limit_group_and_topic_to_three_students.sql` | Quy mô chính thức: `ck_topics_size` (`max_students BETWEEN 1 AND 3`, mặc định 3) và `ck_groups_size` (`member_count BETWEEN 1 AND 3`). |

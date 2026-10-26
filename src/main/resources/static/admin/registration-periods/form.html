@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=1">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thiết lập đợt đăng ký - Quản lý đề tài</title>
+    <link rel="stylesheet" href="../../assets/css/common.css">
+    <link rel="stylesheet" href="../../assets/css/admin.css">
+</head>
+
+<body data-admin data-module="registration-periods" data-view="form">
+    <main class="main-content">
+        <div id="nav"></div>
+        <div class="page-header">
+            <div>
+                <h1>Thiết lập đợt đăng ký</h1>
+                <p class="page-subtitle">Cấu hình khung thời gian đăng ký đề tài cho giảng viên và sinh viên.</p>
+            </div>
+            <a class="button secondary" href="list.html">← Quay lại danh sách</a>
+        </div>
+        <p id="message" class="form-error" role="alert"></p>
+        <form id="entity-form" class="card edit-form entity-form">
+            <div class="form-section">
+                <span class="section-title">1. Thông tin chung</span>
+                <div class="form-grid">
+                    <label class="full-width">
+                        Tên đợt đăng ký
+                        <input name="name" placeholder="Ví dụ: Đợt đăng ký Đề tài Học kỳ 1 2026-2027" required>
+                    </label>
+                    <label class="full-width">
+                        Loại đợt đăng ký
+                        <select name="type">
+                            <option value="COURSE">Môn học</option>
+                            <option value="NCKH">Nghiên cứu khoa học</option>
+                            <option value="TLCN">Tiểu luận chuyên ngành</option>
+                            <option value="KLTN">Khóa luận tốt nghiệp</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <span class="section-title">2. Thời gian Giảng viên (Đề xuất đề tài)</span>
+                <div class="form-grid">
+                    <div class="date-time-field" data-date-time-field>
+                        <span class="date-time-field__title">Thời gian bắt đầu</span>
+                        <div class="date-time-field__controls">
+                            <label class="date-time-part"><span>Ngày</span><input type="date" data-date-part required></label>
+                            <label class="date-time-part"><span>Giờ</span><select data-hour-part required aria-label="Giờ (00–23)"></select></label>
+                            <label class="date-time-part"><span>Phút</span><select data-minute-part required aria-label="Phút (00–59)"></select></label>
+                        </div>
+                        <input name="lecturerStartAt" type="hidden" data-date-time-value data-required="true">
+                    </div>
+                    <div class="date-time-field" data-date-time-field>
+                        <span class="date-time-field__title">Thời gian kết thúc</span>
+                        <div class="date-time-field__controls">
+                            <label class="date-time-part"><span>Ngày</span><input type="date" data-date-part required></label>
+                            <label class="date-time-part"><span>Giờ</span><select data-hour-part required aria-label="Giờ (00–23)"></select></label>
+                            <label class="date-time-part"><span>Phút</span><select data-minute-part required aria-label="Phút (00–59)"></select></label>
+                        </div>
+                        <input name="lecturerEndAt" type="hidden" data-date-time-value data-required="true">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <span class="section-title">3. Thời gian Sinh viên (Đăng ký đề tài)</span>
+                <div class="form-grid">
+                    <div class="date-time-field" data-date-time-field>
+                        <span class="date-time-field__title">Thời gian bắt đầu</span>
+                        <div class="date-time-field__controls">
+                            <label class="date-time-part"><span>Ngày</span><input type="date" data-date-part required></label>
+                            <label class="date-time-part"><span>Giờ</span><select data-hour-part required aria-label="Giờ (00–23)"></select></label>
+                            <label class="date-time-part"><span>Phút</span><select data-minute-part required aria-label="Phút (00–59)"></select></label>
+                        </div>
+                        <input name="studentStartAt" type="hidden" data-date-time-value data-required="true">
+                    </div>
+                    <div class="date-time-field" data-date-time-field>
+                        <span class="date-time-field__title">Thời gian kết thúc</span>
+                        <div class="date-time-field__controls">
+                            <label class="date-time-part"><span>Ngày</span><input type="date" data-date-part required></label>
+                            <label class="date-time-part"><span>Giờ</span><select data-hour-part required aria-label="Giờ (00–23)"></select></label>
+                            <label class="date-time-part"><span>Phút</span><select data-minute-part required aria-label="Phút (00–59)"></select></label>
+                        </div>
+                        <input name="studentEndAt" type="hidden" data-date-time-value data-required="true">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-section" id="section-eval-milestones">
+                <span class="section-title">4. Các mốc đánh giá & bảo vệ (TLCN / KLTN)</span>
+                <div class="form-grid">
+                    <div data-period-field="review" class="period-milestone-field">
+                        <span class="date-time-field__title">Hạn nộp điểm GVPB</span>
+                        <div class="date-time-field" data-date-time-field>
+                            <div class="date-time-field__controls">
+                                <label class="date-time-part"><span>Ngày</span><input type="date" data-date-part></label>
+                                <label class="date-time-part"><span>Giờ</span><select data-hour-part aria-label="Giờ (00–23)"></select></label>
+                                <label class="date-time-part"><span>Phút</span><select data-minute-part aria-label="Phút (00–59)"></select></label>
+                            </div>
+                            <input name="reviewDeadline" type="hidden" data-date-time-value>
+                        </div>
+                        <small>Bắt buộc đối với TLCN và KLTN.</small>
+                    </div>
+                    <label data-period-field="defense">
+                        Ngày báo cáo hội đồng
+                        <input name="defenseDate" type="date">
+                        <small>Chỉ sử dụng và bắt buộc đối với KLTN.</small>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="button primary">Lưu đợt đăng ký</button>
+                <a class="button secondary" href="list.html">Hủy</a>
+            </div>
+        </form>
+    </main>
+    <script src="../../assets/js/common.js"></script>
+    <script src="../../assets/js/admin-shell.js"></script>
+    <script src="../../assets/js/admin-crud.js"></script>
+</body>
+
+</html>
